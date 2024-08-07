@@ -1,4 +1,4 @@
-package pkg
+package spaserve
 
 import "errors"
 
@@ -11,6 +11,8 @@ var ErrCouldNotReadFile = errors.New("could not read file")
 var ErrCouldNotAppendToIndex = errors.New("could not append to index")
 var ErrCouldNotMakeDir = errors.New("could not make dir")
 var ErrCouldNotWriteFile = errors.New("could not write file")
+var ErrCouldNotParseNamespace = errors.New("namespace must match regex: ^[a-zA-Z_][a-zA-Z0-9_]*$")
+var ErrNoNamespace = errors.New("no namespace provided")
 
 // injectWebEnv.appendToIndex
 var ErrCouldNotParseIndex = errors.New("could not parse index")

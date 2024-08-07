@@ -1,10 +1,11 @@
-package pkg
+package spaserve
 
 import (
 	"bytes"
 	"errors"
 	"testing"
 
+	"github.com/psanford/memfs"
 	"golang.org/x/net/html"
 )
 
@@ -96,7 +97,7 @@ func TestInjectWebEnv_appendToIndex(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
-			if got, err := appendToIndex([]byte(tc.indexHtml), tc.appendNode); err != tc.errorType {
+			if got, err := appendToIndex(tc.appendNode)("index.html", []byte(tc.indexHtml)); err != tc.errorType {
 				if tc.errorType != nil {
 					if !errors.Is(err, tc.errorType) {
 						t.Errorf("appendToIndex() error = %v, want %v", err, tc.errorType)
@@ -171,4 +172,26 @@ func TestInjectWebEnv_findHead(t *testing.T) {
 			}
 		})
 	}
+}
+func TestIndexExists(t *testing.T) {
+	fsWithIndex := memfs.New()
+	_ = fsWithIndex.MkdirAll(".", 0755)
+	_ = fsWithIndex.WriteFile("index.html", []byte("Hello, World!"), 0644)
+
+	fsWithoutIndex := memfs.New()
+	_ = fsWithoutIndex.MkdirAll(".", 0755)
+
+	t.Run("index exists", func(t *testing.T) {
+		exists := indexExists(fsWithIndex)
+		if !exists {
+			t.Errorf("indexExists() = false, want true")
+		}
+	})
+
+	t.Run("index does not exist", func(t *testing.T) {
+		exists := indexExists(fsWithoutIndex)
+		if exists {
+			t.Errorf("indexExists() = true, want false")
+		}
+	})
 }
