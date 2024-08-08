@@ -12,3 +12,7 @@ runtime by injecting them into the head tag of the served HTML file.
 Vite is a fantastic build tool, but it doesn't support loading environment variables at runtime.
 This becomes quite a problem when you build a single image for multiple environments or need to
 build images for on-premises deployments where you can't bake in the environment variables.
+
+## Code Coverage
+
+[![codecov](https://codecov.io/gh/jrschumacher/go-spaserve/graph/badge.svg?token=W99WAK10IX)](https://codecov.io/gh/jrschumacher/go-spaserve)
