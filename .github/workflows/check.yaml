@@ -16,6 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-go@v5
+        with:
+          go-version: 1.22
+      - uses: actions/checkout@v4
       - name: Run trunk
         uses: trunk-io/trunk-action@v1
       - name: Run tests
