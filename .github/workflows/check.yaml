@@ -1,3 +1,8 @@
+name: Check
+
+permissions:
+  contents: read
+
 on:
   pull_request:
     branches:
@@ -8,14 +13,14 @@ on:
 
 jobs:
   job:
-    runs-on: ubuntu
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-go@5.0.2
+      - uses: actions/setup-go@v5
       - name: Run trunk
         uses: trunk-io/trunk-action@v1
       - name: Run tests
         run: go test -coverprofile coverage.out ./...
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4.0.1
+        uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
