@@ -9,34 +9,6 @@ import (
 	"golang.org/x/net/html"
 )
 
-type testInjectWebEnvFixtures struct {
-	goodHtml       []byte
-	goodHtmlNode   *html.Node
-	htmlNoHead     []byte
-	htmlNoHeadNode *html.Node
-}
-
-func testInjectWebEnvSetup() testInjectWebEnvFixtures {
-	goodHtml := []byte("<html><head><title /></head><body></body></html>")
-	goodHtmlNode, err := html.Parse(bytes.NewReader(goodHtml))
-	if err != nil {
-		panic(err)
-	}
-
-	htmlNoHead := []byte("<html><body></body></html>")
-	htmlNoHeadNode, err := html.Parse(bytes.NewReader(htmlNoHead))
-	if err != nil {
-		panic(err)
-	}
-
-	return testInjectWebEnvFixtures{
-		goodHtml:       goodHtml,
-		goodHtmlNode:   goodHtmlNode,
-		htmlNoHead:     htmlNoHead,
-		htmlNoHeadNode: htmlNoHeadNode,
-	}
-}
-
 func TestInjectWebEnv(t *testing.T) {
 	// Create a mock file system
 	fsys := memfs.New()

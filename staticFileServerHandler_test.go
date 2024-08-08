@@ -192,7 +192,9 @@ func TestStaticFilesHandler(t *testing.T) {
 		customErrorHandler := func(statusCode int) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(statusCode)
-				w.Write([]byte(errorMsg))
+				if _, err := w.Write([]byte(errorMsg)); err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
 			})
 		}
 		wo := WithMuxErrorHandler(customErrorHandler)
