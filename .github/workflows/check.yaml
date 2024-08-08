@@ -8,7 +8,7 @@ on:
     branches:
       - main
     paths-ignore:
-      - "example/**"
+      - example/**
       - "**/*.md"
       - "**/*.yaml"
   push:
@@ -25,9 +25,16 @@ jobs:
           go-version: 1.22
       - name: 🧹 Lint
         uses: golangci/golangci-lint-action@v4
+      - name: Install dependencies
+        run: go install gotest.tools/gotestsum@latest
       - name: 🧪 Test
-        run: go test -race -coverprofile=coverage.out -covermode=atomic
+        run: gotestsum --junitfile junit.xml --format testdox -- -race -coverprofile=coverage.out -covermode=atomic
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

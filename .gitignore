@@ -1,3 +1,8 @@
+# ide
+.vscode
+.trunk
+
 # tests
 coverage.out
 coverage.html
+junit.xml
