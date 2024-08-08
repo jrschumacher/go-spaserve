@@ -19,10 +19,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.22
-      - name: Run trunk
-        uses: trunk-io/trunk-action@v1
-      - name: Run tests
-        run: go test -coverprofile coverage.out ./...
+      - name: 🧹 Lint
+        uses: golangci/golangci-lint-action@v4
+      - name: 🧪 Test
+        run: go test -race -coverprofile=coverage.out -covermode=atomic
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4
         with:
