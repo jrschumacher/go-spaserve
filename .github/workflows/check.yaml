@@ -1,0 +1,21 @@
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  job:
+    runs-on: ubuntu
+    steps:
+      - uses: actions/setup-go@5.0.2
+      - name: Run trunk
+        uses: trunk-io/trunk-action@v1
+      - name: Run tests
+        run: go test -coverprofile coverage.out ./...
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
