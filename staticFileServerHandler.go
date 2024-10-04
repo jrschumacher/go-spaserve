@@ -1,7 +1,6 @@
 package spaserve
 
 import (
-	"context"
 	"errors"
 	"io/fs"
 	"log/slog"
@@ -12,6 +11,14 @@ import (
 
 	"github.com/psanford/memfs"
 )
+
+type StaticFilesHandler struct {
+	opts          staticFilesHandlerOpts
+	fileServer    http.Handler
+	mfilesys      *memfs.FS
+	logger        *servespaLogger
+	muxErrHandler func(int, http.ResponseWriter, *http.Request)
+}
 
 type staticFilesHandlerOpts struct {
 	ns            string
@@ -92,15 +99,12 @@ func WithInjectWebEnv(env any, namespace string) staticFilesHandlerFunc {
 //   - ctx: the context
 //   - filesys: the file system to serve files from - this will be copied to a memfs
 //   - fn: optional functions to configure the handler (e.g. WithLogger, WithBasePath, WithMuxErrorHandler, WithInjectWebEnv)
-func StaticFilesHandler(ctx context.Context, filesys fs.FS, fn ...staticFilesHandlerFunc) (http.Handler, error) {
+func NewStaticFilesHandler(filesys fs.FS, fn ...staticFilesHandlerFunc) (http.Handler, error) {
 	// process options
 	opts := defaultStaticFilesHandlerOpts
 	for _, f := range fn {
 		opts = f(opts)
 	}
-
-	logWithAttrs := newLoggerWithContext(ctx, opts.logger)
-	muxErrHandler := newMuxErrorHandler(opts.muxErrHandler)
 
 	var (
 		mfilesys *memfs.FS
@@ -118,89 +122,69 @@ func StaticFilesHandler(ctx context.Context, filesys fs.FS, fn ...staticFilesHan
 
 	// create file server
 	fileServer := http.FileServer(http.FS(mfilesys))
+	logger := newLogger(opts.logger)
 
-	// return handler
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// serve index.html for root path
-		if r.URL.Path == "/" {
-			fileServer.ServeHTTP(w, r)
-			return
-		}
+	return &StaticFilesHandler{
+		opts:          opts,
+		mfilesys:      mfilesys,
+		fileServer:    fileServer,
+		logger:        logger,
+		muxErrHandler: newMuxErrorHandler(opts.muxErrHandler),
+	}, nil
+}
 
-		// warn if base path might be wrong
-		if len(opts.basePath) > 0 && r.URL.Path[:len(opts.basePath)] != opts.basePath {
-			logWithAttrs(slog.LevelInfo, "WARNING: base path may not be set correctly",
-				slog.Attr{Key: "reqPath", Value: slog.StringValue(r.URL.Path)},
-				slog.Attr{Key: "basePath", Value: slog.StringValue(opts.basePath)},
-			)
-		}
+func (h *StaticFilesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 
-		// clean path for security and consistency
-		cleanedPath := path.Clean(r.URL.Path)
-		cleanedPath = strings.TrimPrefix(cleanedPath, opts.basePath)
+	// clean path for security and consistency
+	cleanedPath := path.Clean(r.URL.Path)
+	cleanedPath = strings.TrimPrefix(cleanedPath, h.opts.basePath)
+	cleanedPath = strings.TrimPrefix(cleanedPath, "/")
+	cleanedPath = strings.TrimSuffix(cleanedPath, "/")
 
+	h.logger.logContext(ctx, slog.LevelDebug, "request", slog.Attr{Key: "cleanedPath", Value: slog.StringValue(cleanedPath)})
+
+	// reconstitute the path
+	r.URL.Path = "/" + cleanedPath
+
+	// use root path for index.html
+	if r.URL.Path == "index.html" {
+		r.URL.Path = "/"
+	}
+
+	// handle non-root paths
+	if r.URL.Path != "/" {
 		// open file
-		file, err := mfilesys.Open(cleanedPath)
-		if file != nil {
-			defer file.Close()
-		}
-
-		// ensure leading slash
-		r.URL.Path = cleanedPath
-		if r.URL.Path[0] != '/' {
-			r.URL.Path = "/" + r.URL.Path
-		}
-
-		// if index.html is requested, rewrite to avoid 301 redirect
-		if r.URL.Path == "/index.html" {
-			r.URL.Path = "/"
-		}
-
+		file, err := h.mfilesys.Open(cleanedPath)
+		isErr := err != nil
 		isErrNotExist := errors.Is(err, os.ErrNotExist)
 		isFile := path.Ext(cleanedPath) != ""
-
-		// if err != nil {
-		// 	fmt.Printf("error: %v\n", err)
-		// 	fmt.Printf("request path: %s\n", r.URL.Path)
-		// 	fmt.Printf("cleaned path: %s\n", cleanedPath)
-		// 	fs.WalkDir(mfilesys, ".", func(path string, d fs.DirEntry, err error) error {
-		// 		fmt.Printf("path: %s, d: %v, err: %v\n", path, d, err)
-		// 		return nil
-		// 	})
-		// }
+		if file != nil {
+			file.Close()
+		}
 
 		// return 500 for other errors
-		if err != nil && !isErrNotExist {
-			logWithAttrs(slog.LevelError, "could not open file", slog.Attr{Key: "cleanedPath", Value: slog.StringValue(cleanedPath)})
-			muxErrHandler(http.StatusInternalServerError, w, r)
+		if isErr && !isErrNotExist {
+			h.logger.logContext(ctx, slog.LevelError, "could not open file", slog.Attr{Key: "cleanedPath", Value: slog.StringValue(cleanedPath)})
+			h.muxErrHandler(http.StatusInternalServerError, w, r)
 			return
 		}
 
 		// return 404 for actual static file requests that don't exist
-		if err != nil && isErrNotExist && isFile {
-			logWithAttrs(slog.LevelError, "could not find file", slog.Attr{Key: "cleanedPath", Value: slog.StringValue(cleanedPath)})
-			muxErrHandler(http.StatusNotFound, w, r)
+		if isErrNotExist && isFile {
+			h.logger.logContext(ctx, slog.LevelDebug, "not found, static file", slog.Attr{Key: "cleanedPath", Value: slog.StringValue(cleanedPath)})
+			h.muxErrHandler(http.StatusNotFound, w, r)
 			return
 		}
 
 		// serve index.html and let SPA handle undefined routes
 		if isErrNotExist {
-			logWithAttrs(slog.LevelDebug, "not found, serve index", slog.Attr{Key: "cleanedPath", Value: slog.StringValue(cleanedPath)})
+			h.logger.logContext(ctx, slog.LevelDebug, "not found, serve index", slog.Attr{Key: "cleanedPath", Value: slog.StringValue(cleanedPath)})
 			r.URL.Path = "/"
 		}
-
-		fileServer.ServeHTTP(w, r)
-	}), nil
-}
-
-// newLoggerWithContext creates a new logger function with the given context and logger.
-func newLoggerWithContext(ctx context.Context, logger *slog.Logger) func(slog.Level, string, ...slog.Attr) {
-	return func(level slog.Level, msg string, attrs ...slog.Attr) {
-		if logger == nil {
-			return
-		}
-		logger.LogAttrs(ctx, level, msg, attrs...)
 	}
+
+	h.fileServer.ServeHTTP(w, r)
 }
 
 // newMuxErrorHandler creates a new error handler function with the given muxErrHandler.
