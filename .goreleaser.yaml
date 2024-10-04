@@ -1,0 +1,8 @@
+version: 2
+builds:
+  - skip: true
+release:
+  github:
+    owner: jrschumacher
+    name: go-spaserve
+  prerelease: auto
