@@ -2,7 +2,6 @@ package spaserve
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,11 +13,10 @@ import (
 )
 
 func TestStaticFilesHandler(t *testing.T) {
-	ctx := context.TODO()
 	filesys := os.DirFS(path.Join("testdata", "files"))
 
 	t.Run("ServeIndexHTML", func(t *testing.T) {
-		handler, err := StaticFilesHandler(ctx, filesys)
+		handler, err := NewStaticFilesHandler(filesys)
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
@@ -31,10 +29,19 @@ func TestStaticFilesHandler(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status code %d, but got %d", http.StatusOK, w.Code)
 		}
+
+		req = httptest.NewRequest(http.MethodGet, "/index.html", nil)
+		w = httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		// Assert that index.html is served
+		if w.Code != http.StatusMovedPermanently {
+			t.Errorf("Expected status code %d, but got %d", http.StatusMovedPermanently, w.Code)
+		}
 	})
 
 	t.Run("ServeExistingFile", func(t *testing.T) {
-		handler, err := StaticFilesHandler(ctx, filesys)
+		handler, err := NewStaticFilesHandler(filesys)
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
@@ -50,7 +57,7 @@ func TestStaticFilesHandler(t *testing.T) {
 	})
 
 	t.Run("ServeNonExistingFile", func(t *testing.T) {
-		handler, err := StaticFilesHandler(ctx, filesys)
+		handler, err := NewStaticFilesHandler(filesys)
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
@@ -66,7 +73,7 @@ func TestStaticFilesHandler(t *testing.T) {
 	})
 
 	t.Run("ServeIndexOnNonExistingFile", func(t *testing.T) {
-		handler, err := StaticFilesHandler(ctx, filesys)
+		handler, err := NewStaticFilesHandler(filesys)
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
@@ -135,7 +142,7 @@ func TestStaticFilesHandler(t *testing.T) {
 			}
 		}
 
-		handler, err := StaticFilesHandler(ctx, filesys, WithBasePath("/static"))
+		handler, err := NewStaticFilesHandler(filesys, WithBasePath("/static"))
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
@@ -152,7 +159,9 @@ func TestStaticFilesHandler(t *testing.T) {
 
 	t.Run("Serve with Logger", func(t *testing.T) {
 		bufout := new(bytes.Buffer)
-		logger := slog.New(slog.NewJSONHandler(bufout, &slog.HandlerOptions{}))
+		logger := slog.New(slog.NewJSONHandler(bufout, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		}))
 
 		// Test WithLogger function
 		wo := WithLogger(logger)
@@ -162,7 +171,7 @@ func TestStaticFilesHandler(t *testing.T) {
 		}
 
 		// Call the StaticFilesHandler function with the logger
-		handler, err := StaticFilesHandler(ctx, filesys, wo)
+		handler, err := NewStaticFilesHandler(filesys, wo)
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
@@ -204,7 +213,7 @@ func TestStaticFilesHandler(t *testing.T) {
 			t.Error("Expected mux error handler to be set, but got nil")
 		}
 
-		handler, err := StaticFilesHandler(ctx, filesys, WithMuxErrorHandler(customErrorHandler))
+		handler, err := NewStaticFilesHandler(filesys, WithMuxErrorHandler(customErrorHandler))
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
@@ -271,12 +280,12 @@ func TestStaticFilesHandler(t *testing.T) {
 		}
 
 		// Call the StaticFilesHandler function with the web environment
-		handler, err := StaticFilesHandler(ctx, filesys, WithInjectWebEnv(env, namespace))
+		handler, err := NewStaticFilesHandler(filesys, WithInjectWebEnv(env, namespace))
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/index.html", nil)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 
