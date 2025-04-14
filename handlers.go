@@ -14,17 +14,6 @@ import (
 	"time"
 )
 
-// cleanPath is a helper to clean and normalize URL paths for FS lookup.
-// It removes the base path and ensures the result is relative and uses '/'.
-func cleanPath(basePath, requestPath string) string {
-	if basePath != "/" && strings.HasPrefix(requestPath, basePath) {
-		requestPath = strings.TrimPrefix(requestPath, basePath)
-	}
-	// Ensure leading slash is removed for relative FS lookup
-	cleaned := path.Clean(requestPath) // Clean removes trailing slash, handles .. etc.
-	return strings.TrimPrefix(cleaned, "/")
-}
-
 // --- Base Path Handler ---
 
 type basePathHandler struct {

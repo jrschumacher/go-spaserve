@@ -14,7 +14,7 @@ import (
 // CompositeModifier applies a list of modifiers in sequence.
 type CompositeModifier struct {
 	Modifiers []FileModifier
-	logger    internalLogger // Add logger for better visibility
+// 	logger    internalLogger // Add logger for better visibility
 }
 
 // NewCompositeModifier creates a modifier that chains others.

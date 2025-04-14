@@ -117,7 +117,9 @@ func TestBasePathHandler(t *testing.T) {
 					t.Errorf("Expected path %q, got %q", tt.expectedPath, r.URL.Path)
 					w.WriteHeader(http.StatusInternalServerError)
 				}
-				w.Write([]byte(r.URL.Path))
+				if _, err := w.Write([]byte(r.URL.Path)); err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
 			})
 			handler := newBasePathHandler(nextHandler, tt.basePath)
 			rr := httptest.NewRecorder()
