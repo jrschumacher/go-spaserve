@@ -35,8 +35,8 @@ func TestStaticFilesHandler(t *testing.T) {
 		handler.ServeHTTP(w, req)
 
 		// Assert that index.html is served
-		if w.Code != http.StatusMovedPermanently {
-			t.Errorf("Expected status code %d, but got %d", http.StatusMovedPermanently, w.Code)
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status code %d, but got %d", http.StatusOK, w.Code)
 		}
 	})
 

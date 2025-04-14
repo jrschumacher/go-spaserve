@@ -148,8 +148,8 @@ func (h *StaticFilesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.URL.Path = "/" + cleanedPath
 
 	// use root path for index.html
-	if r.URL.Path == "index.html" {
-		r.URL.Path = "/"
+	if strings.HasSuffix(r.URL.Path, "/index.html") {
+		r.URL.Path = strings.TrimSuffix(r.URL.Path, "index.html")
 	}
 
 	// handle non-root paths
@@ -181,6 +181,10 @@ func (h *StaticFilesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if isErrNotExist {
 			h.logger.logContext(ctx, slog.LevelDebug, "not found, serve index", slog.Attr{Key: "cleanedPath", Value: slog.StringValue(cleanedPath)})
 			r.URL.Path = "/"
+		} else if isErr {
+			h.logger.logContext(ctx, slog.LevelDebug, "server error", slog.Attr{Key: "cleanedPath", Value: slog.StringValue(cleanedPath)}, slog.Any("err", err))
+			h.muxErrHandler(http.StatusNotFound, w, r)
+			return
 		}
 	}
 
