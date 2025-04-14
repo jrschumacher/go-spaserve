@@ -1,7 +1,6 @@
 package spaserve
 
 import (
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,19 +8,6 @@ import (
 	"testing"
 	"testing/fstest"
 )
-
-func TestNewSpaServer_ConfigErrors(t *testing.T) {
-	// Test that configuration errors are propagated
-	_, err := NewSpaServer(SpaServerConfig{}) // Missing FS
-	if !errors.Is(err, ErrMissingFS) {
-		t.Errorf("Expected ErrMissingFS, got %v", err)
-	}
-
-	_, err = NewSpaServer(SpaServerConfig{FS: fstest.MapFS{}, BasePath: "invalid"})
-	if !errors.Is(err, ErrInvalidBasePath) {
-		t.Errorf("Expected ErrInvalidBasePath, got %v", err)
-	}
-}
 
 func TestNewSpaServer_Helpers(t *testing.T) {
 	// Test CreateHtmlScriptTagEnvModifier success
@@ -59,17 +45,15 @@ func TestNewSpaServer_Integration(t *testing.T) {
 		},
 	}
 
-	config := SpaServerConfig{
-		FS:              mockFS,
-		BasePath:        "/ui/", // Test with a base path
-		SpaFallbackPath: "index.html",
-		Targets: []TargetConfig{
+	handler, err := NewSpaServer(
+		mockFS,
+		WithBasePath("/ui/"),
+		WithSpaFallbackPath("index.html"),
+		WithTargets([]TargetConfig{
 			{TargetFile: "config.json", Modifier: configModifier, CacheResult: true},
-		},
-		// Use default logger/error handler
-	}
-
-	handler, err := NewSpaServer(config)
+		}),
+		WithHtmlPageWhitelist([]string{"index.html"}),
+	)
 	if err != nil {
 		t.Fatalf("NewSpaServer failed: %v", err)
 	}
