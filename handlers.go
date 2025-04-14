@@ -57,6 +57,51 @@ func (h *basePathHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.next.ServeHTTP(w, r)
 }
 
+// --- HTML Page Whitelist Handler ---
+
+type htmlPageWhitelistHandler struct {
+	allowed map[string]bool
+	logger  internalLogger
+	next    http.Handler
+}
+
+func newHtmlPageWhitelistHandler(next http.Handler, allowedHtmlPages []string, logger internalLogger) http.Handler {
+	var allowed map[string]bool = make(map[string]bool, len(allowedHtmlPages))
+	for _, allowedHtmlPage := range allowedHtmlPages {
+		allowed[allowedHtmlPage] = true
+	}
+	return &htmlPageWhitelistHandler{allowed: allowed, logger: logger, next: next}
+}
+
+func (h *htmlPageWhitelistHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var fsPath = r.URL.Path
+	switch {
+	case fsPath == "/":
+		fsPath = "index.html"
+	case strings.HasSuffix(fsPath, "/"):
+		fsPath = fsPath[1:] + "index.html"
+	case filepath.Ext(fsPath) == "":
+		fsPath = fsPath[1:] + "/index.html"
+	default:
+		fsPath = fsPath[1:]
+	}
+
+	if filepath.Ext(fsPath) != ".html" {
+		h.next.ServeHTTP(w, r)
+		return
+	}
+	if _, ok := h.allowed[fsPath]; ok {
+		h.next.ServeHTTP(w, r)
+		return
+	}
+
+	h.logger.LogAttrs(r.Context(), slog.LevelError, "Attempting to fetch an HTML page that is not whitelisted",
+		slog.String("path", fsPath),
+		slog.String("ext", filepath.Ext(fsPath)),
+	)
+	http.Error(w, "403 Forbidden", http.StatusForbidden)
+}
+
 // --- Index Page Handler ---
 
 type indexPageHandler struct {

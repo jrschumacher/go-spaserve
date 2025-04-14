@@ -33,6 +33,9 @@ type SpaServerConfig struct {
 	// List of file modification rules. (Optional)
 	Targets []TargetConfig
 
+	// List of valid HTML files
+	HtmlPageWhitelist []string
+
 	// The path (relative to FS root) to serve when a requested path
 	// doesn't correspond to an existing file and appears to be an SPA route
 	// (i.e., doesn't have a file extension). Defaults to "index.html".
