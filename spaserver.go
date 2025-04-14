@@ -1,13 +1,61 @@
 package spaserve
 
 import (
+	"fmt"
+	"io/fs"
 	"maps" // Requires Go 1.21+
 	"net/http"
 )
 
+type spaServerOption func(SpaServerConfig) SpaServerConfig
+
+func WithHtmlPageWhitelist(whitelist []string) spaServerOption {
+	return func(c SpaServerConfig) SpaServerConfig {
+		c.HtmlPageWhitelist = whitelist
+		return c
+	}
+}
+
+func WithSpaFallbackPath(spaFallbackPath string) spaServerOption {
+	return func(c SpaServerConfig) SpaServerConfig {
+		c.SpaFallbackPath = spaFallbackPath
+		return c
+	}
+}
+
+func WithTargets(targets []TargetConfig) spaServerOption {
+	return func(c SpaServerConfig) SpaServerConfig {
+		c.Targets = targets
+		return c
+	}
+}
+
 // NewSpaServer creates a new http.Handler configured to serve a Single Page Application.
 // It applies file modifications, handles SPA routing fallbacks, and serves static files.
-func NewSpaServer(config SpaServerConfig) (http.Handler, error) {
+func NewSpaServer(filesys fs.FS, fn ...interface{}) (http.Handler, error) {
+	config := SpaServerConfig{
+		FS:              filesys,
+		SpaFallbackPath: "/",
+	}
+	staticFileServerHandlerOpts := defaultStaticFilesHandlerOpts
+	for _, f := range fn {
+		spaServerOption, isSPAServerOption := f.(spaServerOption)
+		if isSPAServerOption {
+			config = spaServerOption(config)
+		}
+		staticFileServerOption, isStaticFileServerOption := f.(staticFilesHandlerFunc)
+		if isStaticFileServerOption {
+			staticFileServerHandlerOpts = staticFileServerOption(staticFileServerHandlerOpts)
+		}
+		if !isSPAServerOption && !isStaticFileServerOption {
+			panic(fmt.Errorf("Unknown option: %q", f))
+		}
+	}
+	// Updates from backwards-compatible flags
+	config.BasePath = staticFileServerHandlerOpts.basePath
+	config.Logger = staticFileServerHandlerOpts.logger
+	config.MuxErrorHandler = newMuxErrorHandler(staticFileServerHandlerOpts.muxErrHandler)
+
 	// 1. Apply defaults and validate configuration
 	err := config.configure()
 	if err != nil {
@@ -41,6 +89,26 @@ func NewSpaServer(config SpaServerConfig) (http.Handler, error) {
 
 	// Index page handler makes sure we fetch index pages properly.
 	server = newIndexPageHandler(server)
+
+	// Backwards-compatible modifier handler: if using opts.ns and opts.webEnv, add the modifier
+	// This replicates the staticFileServerHandler behavior
+	if staticFileServerHandlerOpts.ns != "" && staticFileServerHandlerOpts.webEnv != nil {
+		envModifier, err := CreateHtmlScriptTagEnvModifier(
+			staticFileServerHandlerOpts.webEnv,
+			staticFileServerHandlerOpts.ns,
+		)
+		if err != nil {
+			return nil, err
+		}
+		backCompatTargetsMap := map[string]TargetConfig{
+			"index.html": {
+				TargetFile:  "index.html",
+				Modifier:    envModifier,
+				CacheResult: true,
+			},
+		}
+		server = newModifyingHandler(server, config.FS, backCompatTargetsMap, cache, logger, errorHandler)
+	}
 
 	// Modifier handler: Intercepts requests for targeted files, modifies them (using cache).
 	// Delegates non-targeted requests or serves modified content.
