@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/jrschumacher/go-spaserve/compare/v1.0.0...v1.1.0) (2025-04-30)
+
+
+### Features
+
+* refactor to improve support for varying SPA layouts  ([#12](https://github.com/jrschumacher/go-spaserve/issues/12)) ([1cd4051](https://github.com/jrschumacher/go-spaserve/commit/1cd40519fcc86bc3efc989a382b2003e42380167))
+
 ## 1.0.0 (2024-10-04)
 
 
