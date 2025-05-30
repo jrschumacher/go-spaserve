@@ -283,13 +283,19 @@ func getAttr(attrList []html.Attribute, key string) (html.Attribute, bool) {
 }
 
 func (csp *CSPContentNonceModifier) applyNonceToNodes(node *html.Node, nonce string) {
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		csp.applyNonceToNodes(child, nonce)
+	}
+	if node.Type != html.ElementNode {
+		return
+	}
 	canHaveNonce := node.Data == "script" || node.Data == "style" || (node.Data == "link" && attrListHas(node.Attr, "rel", "stylesheet"))
 	styleAttr, hasStyleAttr := getAttr(node.Attr, "style")
 	if canHaveNonce || hasStyleAttr {
 		if csp.nonceElementDecider != nil && !csp.nonceElementDecider.ShouldModify(node) {
 			return
 		}
-		switch true {
+		switch {
 		case canHaveNonce:
 			node.Attr = append(node.Attr, html.Attribute{
 				Key: "nonce",
@@ -325,25 +331,24 @@ func (csp *CSPContentNonceModifier) applyNonceToNodes(node *html.Node, nonce str
 			parent.InsertBefore(styleNode, node)
 
 			classAttr, hasClassAttr := getAttr(node.Attr, "class")
+			newClassAttr := className
 			if hasClassAttr {
-				newAttrs := make([]html.Attribute, 0, len(node.Attr))
-				for _, attr := range node.Attr {
-					if attr.Key == "class" {
-						attr.Val = classAttr.Val + " " + className
-					}
+				newClassAttr = classAttr.Val + " " + className
+			}
+			var newAttrs []html.Attribute
+			for _, attr := range node.Attr {
+				if attr.Key == "class" && hasClassAttr {
+					attr.Val = classAttr.Val + " " + className
+				}
+				if attr.Key != "style" && attr.Key != "class" {
 					newAttrs = append(newAttrs, attr)
 				}
-			} else {
-				node.Attr = append(node.Attr, html.Attribute{
-					Key: "class",
-					Val: className,
-				})
 			}
+			node.Attr = append(newAttrs, html.Attribute{
+				Key: "class",
+				Val: newClassAttr,
+			})
 		}
-		return
-	}
-	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		csp.applyNonceToNodes(child, nonce)
 	}
 }
 
@@ -356,7 +361,7 @@ func makeNonce(length int) (string, error) {
 	return hex.EncodeToString(randomBytes), nil
 }
 
-const defaultNonceLength = 32
+const defaultNonceLength = 10
 
 func (csp *CSPContentNonceModifier) ModifyContent(context FileModifierContext, content []byte) ([]byte, error) {
 	doc, err := html.Parse(bytes.NewReader(content))
