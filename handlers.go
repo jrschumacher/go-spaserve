@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -160,32 +161,50 @@ func (h *spaRouterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // --- Modifying Handler ---
 
 type modifyingHandler struct {
-	next         http.Handler // The handler that serves files (e.g., http.FileServer)
-	originalFs   fs.FS
-	targetsMap   map[string]TargetConfig // map[relativePath]TargetConfig
-	cache        Cache
-	logger       internalLogger
-	errHandler   internalErrorHandler
-	pendingLocks sync.Map // map[path]*sync.Mutex for concurrent first access
+	next          http.Handler // The handler that serves files (e.g., http.FileServer)
+	originalFs    fs.FS
+	targetConfigs []TargetConfig // map[relativePath]TargetConfig
+	dataCache     Cache[[]byte]
+	headerCache   Cache[http.Header]
+	logger        internalLogger
+	errHandler    internalErrorHandler
+	pendingLocks  sync.Map // map[path]*sync.Mutex for concurrent first access
 }
 
 func newModifyingHandler(
 	next http.Handler,
 	originalFs fs.FS,
-	targetsMap map[string]TargetConfig,
-	cache Cache,
+	targetConfigs []TargetConfig,
+	dataCache Cache[[]byte],
+	headerCache Cache[http.Header],
 	logger internalLogger,
 	errHandler internalErrorHandler,
 ) http.Handler {
 	return &modifyingHandler{
-		next:       next,
-		originalFs: originalFs,
-		targetsMap: targetsMap,
-		cache:      cache,
-		logger:     logger,
-		errHandler: errHandler,
+		next:          next,
+		originalFs:    originalFs,
+		targetConfigs: targetConfigs,
+		dataCache:     dataCache,
+		headerCache:   headerCache,
+		logger:        logger,
+		errHandler:    errHandler,
 		// pendingLocks initialized implicitly by sync.Map
 	}
+}
+
+func fileMatcherToRxString(fileMatcher string) string {
+	var builder strings.Builder
+	builder.Grow(3 * len(fileMatcher))
+	for _, char := range fileMatcher {
+		builder.WriteString("[")
+		builder.WriteString(string(char))
+		builder.WriteString("]")
+	}
+	result := builder.String()
+	result = strings.ReplaceAll(result, "[*][*][/]", "(.+?/)*")
+	result = strings.ReplaceAll(result, "[*][*]", ".*?")
+	result = strings.ReplaceAll(result, "[*]", "[^/]*?")
+	return result
 }
 
 func (h *modifyingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -204,21 +223,38 @@ func (h *modifyingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fsPath = fsPath[1:]
 	}
 
-	targetConf, isTargeted := h.targetsMap[fsPath]
+	hasTargetConfig := false
+	shouldCache := true
+	matchingModifiers := make([]FileModifier, 0)
+	for _, targetConfig := range h.targetConfigs {
+		fileMatcherAsRxString := fileMatcherToRxString(targetConfig.TargetFile)
+		fileMatcherRx := regexp.MustCompile(fileMatcherAsRxString)
+		if fileMatcherRx.Match([]byte(fsPath)) {
+			hasTargetConfig = true
+			matchingModifiers = append(matchingModifiers, targetConfig.Modifier)
+			if targetConfig.CacheResult == false {
+				shouldCache = false
+			}
+		}
+	}
 
 	// If not a targeted file, delegate to the next handler (http.FileServer)
-	if !isTargeted {
+	if !hasTargetConfig {
 		h.next.ServeHTTP(w, r)
 		return
 	}
 
+	var modifier FileModifier = NewCompositeModifier(matchingModifiers...)
+
 	h.logger.LogAttrs(ctx, slog.LevelDebug, "Targeted file requested", slog.String("path", fsPath))
 
 	// Check cache first
-	if targetConf.CacheResult {
-		if cachedData, found := h.cache.Get(fsPath); found {
+	if shouldCache {
+		cachedData, cachedDataFound := h.dataCache.Get(fsPath)
+		cachedHeaders, cachedHeadersFound := h.headerCache.Get(fsPath)
+		if cachedDataFound && cachedHeadersFound {
 			h.logger.LogAttrs(ctx, slog.LevelDebug, "Serving modified file from cache", slog.String("path", fsPath))
-			serveContent(w, r, fsPath, cachedData)
+			serveContent(w, r, fsPath, *cachedData, *cachedHeaders)
 			return
 		}
 	}
@@ -232,10 +268,12 @@ func (h *modifyingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer pathLock.Unlock() // Ensure lock is released
 
 	// Double-check cache after acquiring lock (another goroutine might have finished)
-	if targetConf.CacheResult {
-		if cachedData, found := h.cache.Get(fsPath); found {
+	if shouldCache {
+		cachedData, cachedDataFound := h.dataCache.Get(fsPath)
+		cachedHeaders, cachedHeadersFound := h.headerCache.Get(fsPath)
+		if cachedDataFound && cachedHeadersFound {
 			h.logger.LogAttrs(ctx, slog.LevelDebug, "Serving modified file from cache (post-lock)", slog.String("path", fsPath))
-			serveContent(w, r, fsPath, cachedData)
+			serveContent(w, r, fsPath, *cachedData, *cachedHeaders)
 			return
 		}
 	}
@@ -257,43 +295,73 @@ func (h *modifyingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Apply modifier
-	modifiedData, err := targetConf.Modifier.Modify(fsPath, originalData)
-	if err != nil {
-		h.logger.LogAttrs(ctx, slog.LevelError, "File modification failed", slog.String("path", fsPath), slog.Any("error", err))
-		// Consider wrapping the error before logging? Modifier might already do that.
-		h.errHandler(http.StatusInternalServerError, w, r)
-		return
+	dataToServe := originalData
+	headersToServe := w.Header()
+	fileModifierContext := FileModifierContext{
+		Request: FileModifierContextRequest{
+			Headers: headersToServe.Clone(),
+			Path:    fsPath,
+		},
+		Scratch: make(map[string]any),
 	}
 
-	// Cache if configured
-	if targetConf.CacheResult {
-		h.cache.Set(fsPath, modifiedData)
-		h.logger.LogAttrs(ctx, slog.LevelDebug, "Stored modification result in cache", slog.String("path", fsPath))
-		// Remove lock from map once done? Or keep it for potential future non-cached modifications?
-		// For simplicity, keep the lock in the map. It's small.
-	} else {
-		// If not caching, we should remove the lock from the map to avoid memory leak if the file is requested many times.
-		h.pendingLocks.Delete(fsPath)
+	fileContentModifier, isFileContentModifier := modifier.(FileContentModifier)
+	if isFileContentModifier {
+		modifiedData, err := fileContentModifier.ModifyContent(fileModifierContext, originalData)
+		if err != nil {
+			h.logger.LogAttrs(ctx, slog.LevelError, "File content modification failed", slog.String("path", fsPath), slog.Any("error", err))
+			h.errHandler(http.StatusInternalServerError, w, r)
+			return
+		}
+
+		dataToServe = modifiedData
 	}
 
-	// Serve the modified content
-	serveContent(w, r, fsPath, modifiedData)
-}
-
-// serveContent writes the data to the response writer, setting Content-Type.
-func serveContent(w http.ResponseWriter, r *http.Request, filePath string, data []byte) {
 	// Determine Content-Type
-	contentType := mime.TypeByExtension(path.Ext(filePath))
+	contentType := mime.TypeByExtension(path.Ext(fsPath))
 	if contentType == "" {
-		// Default to octet-stream or sniff content? Sniffing is generally better.
-		contentType = http.DetectContentType(data)
+		contentType = http.DetectContentType(dataToServe)
 	}
 	w.Header().Set("Content-Type", contentType)
 
-	// Consider adding ETag or Last-Modified headers based on content hash/mod time if possible
-	// For simplicity, we omit them here. Caching is handled by the MemoryCache.
+	fileResponseHeaderModifier, isFileResponseHeaderModifier := modifier.(FileResponseHeaderModifier)
+	if isFileResponseHeaderModifier {
+		modifiedHeaders, err := fileResponseHeaderModifier.ModifyResponseHeaders(fileModifierContext)
+		if err != nil {
+			h.logger.LogAttrs(ctx, slog.LevelError, "File header modification failed", slog.String("path", fsPath), slog.Any("error", err))
+			h.errHandler(http.StatusInternalServerError, w, r)
+			return
+		}
 
+		modifiedHeadersClone := modifiedHeaders.Clone()
+
+		fileModifierContext.Request.Headers = modifiedHeadersClone
+		headersToServe = modifiedHeadersClone
+	}
+
+	// Cache if configured
+	if shouldCache {
+		h.dataCache.Set(fsPath, &dataToServe)
+		h.headerCache.Set(fsPath, &headersToServe)
+		h.logger.LogAttrs(ctx, slog.LevelDebug, "Stored modifications in cache", slog.String("path", fsPath))
+	}
+
+	h.pendingLocks.Delete(fsPath)
+
+	// Serve the modified content
+	serveContent(w, r, fsPath, dataToServe, headersToServe)
+}
+
+// serveContent writes the data to the response writer, setting Content-Type.
+func serveContent(w http.ResponseWriter, r *http.Request, filePath string, data []byte, headers http.Header) {
+	for headerName, _ := range w.Header().Clone() {
+		w.Header().Del(headerName)
+	}
+	for headerName, headerValues := range headers {
+		for _, headerValue := range headerValues {
+			w.Header().Set(headerName, headerValue)
+		}
+	}
 	// Serve using http.ServeContent for range requests etc? Requires io.ReadSeeker.
 	// Simpler: just write the bytes.
 	// For more robust serving (range requests, etc.), wrap bytes in a reader seeker:

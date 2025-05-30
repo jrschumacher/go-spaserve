@@ -6,19 +6,41 @@ import (
 	"net/http"
 )
 
-// FileModifier defines the interface for transforming file content.
 type FileModifier interface {
-	// Modify takes the original file path and content,
+	// maybe we should add something here to make it non-empty
+}
+
+type FileModifierContextRequest struct {
+	Headers http.Header
+	Path    string
+}
+
+type FileModifierContext struct {
+	Request FileModifierContextRequest
+	Scratch map[string]any
+}
+
+// FileContentModifier defines the interface for transforming file content.
+type FileContentModifier interface {
+	FileModifier // Embeds FileModifier
+	// ModifyContent takes the original file path and content,
 	// returns the modified content or an error.
-	Modify(path string, originalContent []byte) (modifiedContent []byte, err error)
+	ModifyContent(context FileModifierContext, content []byte) (modifiedContent []byte, err error)
+}
+
+// FileResponseHeaderModifier allows HTTP headers to be set for the response of a file.
+type FileResponseHeaderModifier interface {
+	FileModifier // Embeds FileModifier
+	// ModifyResponseHeaders returns a map of HTTP headers that should be applied to the response
+	// for the given path and its (potentially modified) content.
+	ModifyResponseHeaders(context FileModifierContext) (http.Header, error)
 }
 
 // Cache defines the interface for storing and retrieving processed file content.
 // Implementations must be safe for concurrent use.
-type Cache interface {
-	Get(key string) (data []byte, found bool)
-	Set(key string, data []byte)
-	// Consider adding Delete(key string) if cache invalidation becomes necessary.
+type Cache[T any] interface {
+	Get(key string) (data *T, found bool)
+	Set(key string, data *T)
 }
 
 // FileChecker defines the interface for checking file existence.

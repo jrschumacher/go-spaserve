@@ -3,6 +3,7 @@ package spaserve
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -31,7 +32,13 @@ func TestHtmlScriptModifier_Modify_Success(t *testing.T) {
 
 	expectedScriptContent := `window.APP_CONFIG = {"api":"http://localhost:8080","feature":"true"};`
 
-	modifiedBytes, err := modifier.Modify("index.html", []byte(htmlInput))
+	modifiedBytes, err := modifier.ModifyContent(FileModifierContext{
+		Request: FileModifierContextRequest{
+			Headers: make(http.Header),
+			Path:    "test.txt",
+		},
+		Scratch: make(map[string]any),
+	}, []byte(htmlInput))
 	if err != nil {
 		t.Fatalf("Modify failed: %v", err)
 	}
@@ -59,7 +66,13 @@ func TestHtmlScriptModifier_Modify_NoHeadAddsToHtml(t *testing.T) {
 	htmlInput := `<html><body><p>Test</p></body></html>`
 	expectedScriptContent := `window.CONFIG = {"ok":true};`
 
-	modifiedBytes, err := modifier.Modify("test.html", []byte(htmlInput))
+	modifiedBytes, err := modifier.ModifyContent(FileModifierContext{
+		Request: FileModifierContextRequest{
+			Headers: make(http.Header),
+			Path:    "test.txt",
+		},
+		Scratch: make(map[string]any),
+	}, []byte(htmlInput))
 	if err != nil {
 		t.Fatalf("Modify failed unexpectedly: %v", err)
 	}
@@ -87,7 +100,13 @@ func TestHtmlScriptModifier_Modify_InvalidNamespace(t *testing.T) {
 
 func TestHtmlScriptModifier_Modify_JsonMarshalError(t *testing.T) {
 	modifier, _ := NewHtmlScriptTagEnvModifier(make(chan int), "CONFIG") // Channels can't be marshalled
-	_, err := modifier.Modify("index.html", []byte("<html><head></head><body></body></html>"))
+	_, err := modifier.ModifyContent(FileModifierContext{
+		Request: FileModifierContextRequest{
+			Headers: make(http.Header),
+			Path:    "test.txt",
+		},
+		Scratch: make(map[string]any),
+	}, []byte("<html><head></head><body></body></html>"))
 	if err == nil {
 		t.Errorf("Expected error for JSON marshalling failure, but got nil")
 	} else if !errors.Is(err, ErrCouldNotMarshalEnv) {
@@ -98,7 +117,7 @@ func TestHtmlScriptModifier_Modify_JsonMarshalError(t *testing.T) {
 // Golang's HTML parser attempts to be spec-compliant and will create nodes that do not exist.
 // func TestHtmlScriptModifier_Modify_HtmlParseError(t *testing.T) {
 // 	modifier, _ := NewHtmlScriptTagEnvModifier(map[string]string{}, "CONFIG")
-// 	_, err := modifier.Modify("index.html", []byte("<html><head><body></html>")) // Malformed HTML
+// 	_, err := modifier.ModifyContent()("index.html", []byte("<html><head><body></html>")) // Malformed HTML
 // 	if err == nil {
 // 		t.Errorf("Expected error for HTML parsing failure, but got nil")
 // 	} else if !errors.Is(err, ErrCouldNotParseHtml) {
@@ -108,7 +127,7 @@ func TestHtmlScriptModifier_Modify_JsonMarshalError(t *testing.T) {
 //
 // func TestHtmlScriptModifier_Modify_NoHeadOrHtmlError(t *testing.T) {
 // 	modifier, _ := NewHtmlScriptTagEnvModifier(map[string]string{}, "CONFIG")
-// 	res, err := modifier.Modify("index.html", []byte("Just text"))
+// 	res, err := modifier.ModifyContent()("index.html", []byte("Just text"))
 // 	if err == nil {
 // 		t.Errorf("Expected error for missing head/html tag, but got nil from: %q", res)
 // 	} else if !errors.Is(err, ErrCouldNotFindHead) {
@@ -124,9 +143,9 @@ type mockStringModifier struct {
 	fail   bool
 }
 
-func (m *mockStringModifier) Modify(path string, originalContent []byte) ([]byte, error) {
+func (m *mockStringModifier) ModifyContent(context FileModifierContext, originalContent []byte) ([]byte, error) {
 	if m.fail {
-		return nil, fmt.Errorf("mock fail for %s", path)
+		return nil, fmt.Errorf("mock fail for %s", context.Request.Path)
 	}
 	return append(originalContent, []byte(m.append)...), nil
 }
@@ -139,7 +158,13 @@ func TestCompositeModifier_Modify_Success(t *testing.T) {
 	input := []byte("Start")
 	expected := []byte("Start::Mod1::Mod2")
 
-	result, err := composite.Modify("test.txt", input)
+	result, err := composite.ModifyContent(FileModifierContext{
+		Request: FileModifierContextRequest{
+			Headers: make(http.Header),
+			Path:    "test.txt",
+		},
+		Scratch: make(map[string]any),
+	}, input)
 	if err != nil {
 		t.Fatalf("Composite Modify failed: %v", err)
 	}
@@ -152,7 +177,13 @@ func TestCompositeModifier_Modify_Empty(t *testing.T) {
 	composite := NewCompositeModifier() // No modifiers
 	input := []byte("Start")
 
-	result, err := composite.Modify("test.txt", input)
+	result, err := composite.ModifyContent(FileModifierContext{
+		Request: FileModifierContextRequest{
+			Headers: make(http.Header),
+			Path:    "test.txt",
+		},
+		Scratch: make(map[string]any),
+	}, input)
 	if err != nil {
 		t.Fatalf("Empty Composite Modify failed: %v", err)
 	}
@@ -168,7 +199,13 @@ func TestCompositeModifier_Modify_ErrorPropagation(t *testing.T) {
 	composite := NewCompositeModifier(mod1, modFail, mod3)
 
 	input := []byte("Start")
-	_, err := composite.Modify("test.txt", input)
+	_, err := composite.ModifyContent(FileModifierContext{
+		Request: FileModifierContextRequest{
+			Headers: make(http.Header),
+			Path:    "test.txt",
+		},
+		Scratch: make(map[string]any),
+	}, input)
 
 	if err == nil {
 		t.Fatalf("Expected composite modifier to fail, but got nil error")
@@ -177,7 +214,7 @@ func TestCompositeModifier_Modify_ErrorPropagation(t *testing.T) {
 	if !strings.Contains(err.Error(), "mock fail") {
 		t.Errorf("Expected error message to contain 'mock fail', got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "step 1 failed") { // Modifiers are 0-indexed
+	if !strings.Contains(err.Error(), "step 1 (ModifyContent) failed") { // Modifiers are 0-indexed
 		t.Errorf("Expected error message to indicate step 1 failed, got: %v", err)
 	}
 }

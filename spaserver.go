@@ -3,7 +3,6 @@ package spaserve
 import (
 	"fmt"
 	"io/fs"
-	"maps" // Requires Go 1.21+
 	"net/http"
 )
 
@@ -66,17 +65,9 @@ func NewSpaServer(filesys fs.FS, fn ...interface{}) (http.Handler, error) {
 	logger := newInternalLogger(config.Logger)
 	errorHandler := newInternalErrorHandler(config.MuxErrorHandler)
 	checker := NewFSFileChecker(config.FS)
-	cache := NewMemoryCache() // Always create a memory cache for now
-
-	// Create a map for efficient target lookup
-	targetsMap := make(map[string]TargetConfig, len(config.Targets))
-	for _, t := range config.Targets {
-		// Use the cleaned path from config.configure()
-		targetsMap[t.TargetFile] = t
-	}
-	// Make map immutable for handlers? Not strictly necessary but good practice.
-	// If Go >= 1.21 use maps.Clone
-	targetsMap = maps.Clone(targetsMap)
+	dataCache := NewMemoryCache[[]byte]()        // Always create a memory cache for now
+	headerCache := NewMemoryCache[http.Header]() // Always create a memory cache for now
+	targetConfigs := append([]TargetConfig{}, config.Targets...)
 
 	// 3. Assemble the middleware chain (order matters: outer handlers run first)
 
@@ -100,19 +91,22 @@ func NewSpaServer(filesys fs.FS, fn ...interface{}) (http.Handler, error) {
 		if err != nil {
 			return nil, err
 		}
-		backCompatTargetsMap := map[string]TargetConfig{
-			"index.html": {
-				TargetFile:  "index.html",
-				Modifier:    envModifier,
-				CacheResult: true,
+		// Prepend our handler to ensure CSP will come after it always to add a nonce
+		targetConfigs = append(
+			[]TargetConfig{
+				{
+					TargetFile:  "index.html",
+					Modifier:    envModifier,
+					CacheResult: true,
+				},
 			},
-		}
-		server = newModifyingHandler(server, config.FS, backCompatTargetsMap, cache, logger, errorHandler)
+			targetConfigs...,
+		)
 	}
 
 	// Modifier handler: Intercepts requests for targeted files, modifies them (using cache).
 	// Delegates non-targeted requests or serves modified content.
-	server = newModifyingHandler(server, config.FS, targetsMap, cache, logger, errorHandler)
+	server = newModifyingHandler(server, config.FS, targetConfigs, dataCache, headerCache, logger, errorHandler)
 
 	// SPA Router handler: Rewrites requests for non-existent paths without extensions
 	// to the SpaFallbackPath. Delegates all other requests.

@@ -73,7 +73,7 @@ type mockMod struct {
 	mu        sync.Mutex
 }
 
-func (m *mockMod) Modify(path string, originalContent []byte) ([]byte, error) {
+func (m *mockMod) ModifyContent(context FileModifierContext, originalContent []byte) ([]byte, error) {
 	m.mu.Lock()
 	m.callCount++
 	m.mu.Unlock()
@@ -81,7 +81,7 @@ func (m *mockMod) Modify(path string, originalContent []byte) ([]byte, error) {
 		return nil, m.err
 	}
 	if m.transform != nil {
-		return m.transform(path, originalContent), nil
+		return m.transform(context.Request.Path, originalContent), nil
 	}
 	return originalContent, nil
 }
@@ -201,7 +201,8 @@ func TestModifyingHandler(t *testing.T) {
 	}
 	nextHandler := http.FileServer(http.FS(mockFS)) // Use real file server on mock FS
 
-	cache := NewMemoryCache()
+	dataCache := NewMemoryCache[[]byte]()
+	headerCache := NewMemoryCache[http.Header]()
 	logger := newTestLogger()
 	errHandler := newTestErrorHandler()
 
@@ -214,14 +215,14 @@ func TestModifyingHandler(t *testing.T) {
 	// Modifier that fails
 	failingModifier := &mockMod{err: errors.New("MOD_FAIL")}
 
-	targets := map[string]TargetConfig{
-		"target.html":       {TargetFile: "target.html", Modifier: modifier, CacheResult: true},
-		"target-nocache.js": {TargetFile: "target-nocache.js", Modifier: modifier, CacheResult: false},
-		"missing.txt":       {TargetFile: "missing.txt", Modifier: modifier, CacheResult: true},     // File doesn't exist in FS
-		"fail.txt":          {TargetFile: "fail.txt", Modifier: failingModifier, CacheResult: true}, // File exists, mod fails
+	targets := []TargetConfig{
+		{TargetFile: "target.html", Modifier: modifier, CacheResult: true},
+		{TargetFile: "target-nocache.js", Modifier: modifier, CacheResult: false},
+		{TargetFile: "missing.txt", Modifier: modifier, CacheResult: true},     // File doesn't exist in FS
+		{TargetFile: "fail.txt", Modifier: failingModifier, CacheResult: true}, // File exists, mod fails
 	}
 
-	handler := newModifyingHandler(nextHandler, mockFS, targets, cache, logger, errHandler.getHandlerFunc())
+	handler := newModifyingHandler(nextHandler, mockFS, targets, dataCache, headerCache, logger, errHandler.getHandlerFunc())
 
 	// --- Test Cases ---
 	t.Run("Non-Targeted File", func(t *testing.T) {
@@ -257,11 +258,11 @@ func TestModifyingHandler(t *testing.T) {
 			t.Errorf("Expected modifier call count 1, got %d", modifier.GetCallCount())
 		}
 		// Check cache
-		cached, found := cache.Get("target.html")
+		cached, found := dataCache.Get("target.html")
 		if !found {
 			t.Error("Expected modified content to be cached")
 		}
-		if string(cached) != expectedBody {
+		if string(*cached) != expectedBody {
 			t.Error("Cached content mismatch")
 		}
 	})
@@ -297,7 +298,7 @@ func TestModifyingHandler(t *testing.T) {
 			t.Fatalf("Expected modifier call count 1 after first request, got %d", modifier.GetCallCount())
 		}
 		// Check not cached
-		_, found := cache.Get("target-nocache.js")
+		_, found := dataCache.Get("target-nocache.js")
 		if found {
 			t.Error("File with CacheResult=false was cached")
 		}
@@ -345,7 +346,8 @@ func TestModifyingHandler(t *testing.T) {
 	})
 
 	t.Run("Targeted File - Concurrent First Access", func(t *testing.T) {
-		cache := NewMemoryCache() // Fresh cache
+		dataCache := NewMemoryCache[[]byte]()        // Fresh cache
+		headerCache := NewMemoryCache[http.Header]() // Fresh cache
 		concurrentMod := &mockMod{
 			transform: func(p string, d []byte) []byte {
 				time.Sleep(10 * time.Millisecond) // Simulate work
@@ -353,10 +355,10 @@ func TestModifyingHandler(t *testing.T) {
 			},
 		}
 		fs := fstest.MapFS{"concurrent.txt": {Data: []byte("Conc")}}
-		concTargets := map[string]TargetConfig{
-			"concurrent.txt": {Modifier: concurrentMod, CacheResult: true},
+		concTargets := []TargetConfig{
+			{Modifier: concurrentMod, CacheResult: true},
 		}
-		concHandler := newModifyingHandler(http.FileServer(http.FS(fs)), fs, concTargets, cache, logger, errHandler.getHandlerFunc())
+		concHandler := newModifyingHandler(http.FileServer(http.FS(fs)), fs, concTargets, dataCache, headerCache, logger, errHandler.getHandlerFunc())
 
 		numRequests := 5
 		var wg sync.WaitGroup
@@ -388,7 +390,7 @@ func TestModifyingHandler(t *testing.T) {
 			}
 		}
 		// Check cache was populated
-		_, found := cache.Get("concurrent.txt")
+		_, found := dataCache.Get("concurrent.txt")
 		if !found {
 			t.Error("Expected concurrent modification to populate cache")
 		}

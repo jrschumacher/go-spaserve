@@ -8,7 +8,7 @@ import (
 )
 
 func TestMemoryCache_GetSet(t *testing.T) {
-	cache := NewMemoryCache()
+	cache := NewMemoryCache[[]byte]()
 	key := "myKey"
 	value := []byte("myValue")
 
@@ -19,15 +19,15 @@ func TestMemoryCache_GetSet(t *testing.T) {
 	}
 
 	// 2. Set the key
-	cache.Set(key, value)
+	cache.Set(key, &value)
 
 	// 3. Get existing key
 	retrievedValue, found := cache.Get(key)
 	if !found {
 		t.Errorf("Expected key %q to be found after Set", key)
 	}
-	if !bytes.Equal(retrievedValue, value) {
-		t.Errorf("Expected value %q, got %q", string(value), string(retrievedValue))
+	if retrievedValue != &value {
+		t.Errorf("Expected value %q, got %q", string(value), string(*retrievedValue))
 	}
 
 	// 4. Ensure retrieved value is a copy
@@ -40,25 +40,25 @@ func TestMemoryCache_GetSet(t *testing.T) {
 		t.Errorf("Expected key %q to still be found", key)
 	}
 	// Check against the original *before* modification
-	if !bytes.Equal(retrievedAgain, originalValueBeforeModification) {
-		t.Errorf("Cache returned modified slice! Expected %q, got %q", string(originalValueBeforeModification), string(retrievedAgain))
+	if retrievedAgain == &originalValueBeforeModification {
+		t.Errorf("Cache returned modified slice! Expected %q, got %q", string(originalValueBeforeModification), string(*retrievedAgain))
 	}
 
 	// 5. Overwrite key
 	newValue := []byte("newValue")
-	cache.Set(key, newValue)
+	cache.Set(key, &newValue)
 	retrievedOverwritten, foundOverwritten := cache.Get(key)
 	if !foundOverwritten {
 		t.Errorf("Expected key %q to be found after overwrite", key)
 	}
-	if !bytes.Equal(retrievedOverwritten, newValue) {
-		t.Errorf("Expected overwritten value %q, got %q", string(newValue), string(retrievedOverwritten))
+	if retrievedOverwritten == retrievedAgain {
+		t.Errorf("Expected overwritten value %q, got %q", string(newValue), string(*retrievedOverwritten))
 	}
 }
 
 func TestMemoryCache_Concurrency(t *testing.T) {
 	t.Parallel() // Mark goroutine as parallel capable
-	cache := NewMemoryCache()
+	cache := NewMemoryCache[[]byte]()
 	numGoroutines := 100
 	numOpsPerGoroutine := 100
 	var wg sync.WaitGroup
@@ -73,7 +73,7 @@ func TestMemoryCache_Concurrency(t *testing.T) {
 				key := fmt.Sprintf("key-%d-%d", gID, j%10) // Introduce some key overlap
 				value := []byte(fmt.Sprintf("value-%d-%d", gID, j))
 
-				cache.Set(key, value)
+				cache.Set(key, &value)
 
 				retrieved, found := cache.Get(key)
 				if !found {
@@ -85,8 +85,8 @@ func TestMemoryCache_Concurrency(t *testing.T) {
 				// A simple check is difficult here without external sync.
 				// The main purpose is to run under `go test -race` to detect data races.
 				// A basic check that it's *some* valid value:
-				if !bytes.HasPrefix(retrieved, []byte("value-")) {
-					t.Errorf("Goroutine %d: Retrieved unexpected value for key %s: %q", gID, key, string(retrieved))
+				if !bytes.HasPrefix(*retrieved, []byte("value-")) {
+					t.Errorf("Goroutine %d: Retrieved unexpected value for key %s: %q", gID, key, string(*retrieved))
 				}
 
 				// Read a key potentially set by another goroutine
