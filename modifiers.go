@@ -167,21 +167,9 @@ func findHtmlNode(n *html.Node, tagName string) *html.Node {
 // Ensure HtmlScriptTagEnvModifier implements the interface (compile-time check)
 var _ FileContentModifier = (*HtmlScriptTagEnvModifier)(nil)
 
-// CSPResponseHeaderModifier allows injecting a Content-Security-Policy header
-type CSPResponseHeaderModifier struct {
-	getCsp func(context FileModifierContext) (string, error) // The CSP to apply
-}
-
-// NewCSPResponseHeaderModifier creates a FileModifier that applies CSP to a response.
-func NewCSPResponseHeaderModifier(getCsp func(context FileModifierContext) (string, error)) *CSPResponseHeaderModifier {
-	return &CSPResponseHeaderModifier{
-		getCsp: getCsp,
-	}
-}
-
-func (csp *CSPResponseHeaderModifier) ModifyResponseHeaders(context FileModifierContext) (http.Header, error) {
+func getCSPFromExisting(existingCSP []string) map[string][]string {
 	newCSP := make(map[string][]string)
-	for _, existingCSPHeader := range context.Request.Headers.Values("Content-Security-Policy") {
+	for _, existingCSPHeader := range existingCSP {
 		rawParts := strings.Split(existingCSPHeader, ";")
 		for _, rawPart := range rawParts {
 			rawDirectiveAndSourceExpressions := strings.Split(strings.TrimSpace(rawPart), " ")
@@ -196,6 +184,32 @@ func (csp *CSPResponseHeaderModifier) ModifyResponseHeaders(context FileModifier
 			}
 		}
 	}
+	return newCSP
+}
+
+func getCSPHeaderFromDirectiveMap(directiveMap map[string][]string) string {
+	newCSPHeaderParts := make([]string, 0)
+	for directive, sourceExpressions := range directiveMap {
+		joinedSourceExpressions := strings.Join(sourceExpressions, " ")
+		newCSPHeaderParts = append(newCSPHeaderParts, directive+" "+joinedSourceExpressions)
+	}
+	return strings.Join(newCSPHeaderParts, "; ")
+}
+
+// CSPResponseHeaderModifier allows injecting a Content-Security-Policy header
+type CSPResponseHeaderModifier struct {
+	getCsp func(context FileModifierContext) (string, error) // The CSP to apply
+}
+
+// NewCSPResponseHeaderModifier creates a FileModifier that applies CSP to a response.
+func NewCSPResponseHeaderModifier(getCsp func(context FileModifierContext) (string, error)) *CSPResponseHeaderModifier {
+	return &CSPResponseHeaderModifier{
+		getCsp: getCsp,
+	}
+}
+
+func (csp *CSPResponseHeaderModifier) ModifyResponseHeaders(context FileModifierContext) (http.Header, error) {
+	newCSP := getCSPFromExisting(context.Request.Headers.Values("Content-Security-Policy"))
 	userCSP, err := csp.getCsp(context)
 	if err != nil {
 		return nil, err
@@ -213,14 +227,10 @@ func (csp *CSPResponseHeaderModifier) ModifyResponseHeaders(context FileModifier
 			}
 		}
 	}
-	newCSPHeaderParts := make([]string, 0)
-	for directive, sourceExpressions := range newCSP {
-		joinedSourceExpressions := strings.Join(sourceExpressions, " ")
-		newCSPHeaderParts = append(newCSPHeaderParts, directive+" "+joinedSourceExpressions)
-	}
+	cspHeader := getCSPHeaderFromDirectiveMap(newCSP)
 	modifiedHeaders := context.Request.Headers.Clone()
 	modifiedHeaders.Del("Content-Security-Policy")
-	modifiedHeaders.Add("Content-Security-Policy", strings.Join(newCSPHeaderParts, "; "))
+	modifiedHeaders.Add("Content-Security-Policy", cspHeader)
 	return modifiedHeaders, nil
 }
 
@@ -397,33 +407,14 @@ func (csp *CSPContentNonceModifier) ModifyResponseHeaders(context FileModifierCo
 	if !nonceIsString {
 		return nil, fmt.Errorf("CSPContentNonceModifier.ModifyResponseHeaders: nonce is not a string: %q", nonce)
 	}
-	newCSP := make(map[string][]string)
-	for _, existingCSPHeader := range context.Request.Headers.Values("Content-Security-Policy") {
-		rawParts := strings.Split(existingCSPHeader, ";")
-		for _, rawPart := range rawParts {
-			rawDirectiveAndSourceExpressions := strings.Split(strings.TrimSpace(rawPart), " ")
-			directive := strings.TrimSpace(rawDirectiveAndSourceExpressions[0])
-			if directive != "" {
-				for _, rawSourceExpression := range rawDirectiveAndSourceExpressions[1:] {
-					sourceExpression := strings.TrimSpace(rawSourceExpression)
-					if sourceExpression != "" {
-						newCSP[directive] = append(newCSP[directive], sourceExpression)
-					}
-				}
-			}
-		}
-	}
+	newCSP := getCSPFromExisting(context.Request.Headers.Values("Content-Security-Policy"))
 	nonceSourceExpression := fmt.Sprintf("'nonce-%s'", nonce)
 	newCSP["script-src"] = append(newCSP["script-src"], nonceSourceExpression)
 	newCSP["style-src"] = append(newCSP["style-src"], nonceSourceExpression)
-	newCSPHeaderParts := make([]string, 0)
-	for directive, sourceExpressions := range newCSP {
-		joinedSourceExpressions := strings.Join(sourceExpressions, " ")
-		newCSPHeaderParts = append(newCSPHeaderParts, directive+" "+joinedSourceExpressions)
-	}
+	cspHeader := getCSPHeaderFromDirectiveMap(newCSP)
 	modifiedHeaders := context.Request.Headers.Clone()
 	modifiedHeaders.Del("Content-Security-Policy")
-	modifiedHeaders.Add("Content-Security-Policy", strings.Join(newCSPHeaderParts, "; "))
+	modifiedHeaders.Add("Content-Security-Policy", cspHeader)
 	return modifiedHeaders, nil
 }
 
