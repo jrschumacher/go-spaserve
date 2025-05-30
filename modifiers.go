@@ -265,14 +265,7 @@ func attrListHas(attrList []html.Attribute, key string, value string) bool {
 	}
 	return false
 }
-func attrListHasAny(attrList []html.Attribute, key string) bool {
-	for _, attr := range attrList {
-		if attr.Key == key {
-			return true
-		}
-	}
-	return false
-}
+
 func getAttr(attrList []html.Attribute, key string) (html.Attribute, bool) {
 	for _, attr := range attrList {
 		if attr.Key == key {
@@ -390,7 +383,7 @@ func (csp *CSPContentNonceModifier) ModifyContent(context FileModifierContext, c
 
 	replacedResult := buffer.String()
 	for _, replacement := range csp.nonceStringReplacements {
-		replacedResult = strings.Replace(replacedResult, replacement, nonce, -1)
+		replacedResult = strings.ReplaceAll(replacedResult, replacement, nonce)
 	}
 	return []byte(replacedResult), nil
 }

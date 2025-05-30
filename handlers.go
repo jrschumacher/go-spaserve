@@ -232,7 +232,7 @@ func (h *modifyingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if fileMatcherRx.Match([]byte(fsPath)) {
 			hasTargetConfig = true
 			matchingModifiers = append(matchingModifiers, targetConfig.Modifier)
-			if targetConfig.CacheResult == false {
+			if !targetConfig.CacheResult {
 				shouldCache = false
 			}
 		}
@@ -354,7 +354,7 @@ func (h *modifyingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // serveContent writes the data to the response writer, setting Content-Type.
 func serveContent(w http.ResponseWriter, r *http.Request, filePath string, data []byte, headers http.Header) {
-	for headerName, _ := range w.Header().Clone() {
+	for headerName := range w.Header().Clone() {
 		w.Header().Del(headerName)
 	}
 	for headerName, headerValues := range headers {
