@@ -3,7 +3,12 @@ import reactLogo from './assets/react.svg'
 import viteLogo from '/vite.svg'
 import './App.css'
 
-function App() {
+function App(props: {
+  cspNonce: string;
+}) {
+  const {
+    cspNonce,
+  } = props;
   const [count, setCount] = useState(0)
 
   return (
@@ -23,6 +28,11 @@ function App() {
         </button>
         <p>
           Edit <code>src/App.tsx</code> and save to test HMR
+        </p>
+      </div>
+      <div className="card">
+        <p>
+          By the way, we got a nonce for CSP: {cspNonce}
         </p>
       </div>
       <p className="read-the-docs">
