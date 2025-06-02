@@ -10,7 +10,7 @@ import (
 	"github.com/jrschumacher/go-spaserve"
 )
 
-//go:embed ui/dist/*
+//go:embed ui/*
 var embeddedFiles embed.FS
 
 // Define constants for application configuration

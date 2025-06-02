@@ -299,6 +299,7 @@ func (h *modifyingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	headersToServe := w.Header()
 	fileModifierContext := FileModifierContext{
 		Request: FileModifierContextRequest{
+			Context: ctx,
 			Headers: headersToServe.Clone(),
 			Path:    fsPath,
 		},

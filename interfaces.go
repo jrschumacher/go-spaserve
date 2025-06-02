@@ -1,7 +1,7 @@
 package spaserve
 
 import (
-	"context" // Keep context for logger just in case
+	"context"
 	"log/slog"
 	"net/http"
 )
@@ -11,6 +11,7 @@ type FileModifier interface {
 }
 
 type FileModifierContextRequest struct {
+	Context context.Context
 	Headers http.Header
 	Path    string
 }
