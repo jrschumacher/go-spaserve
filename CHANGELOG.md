@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/jrschumacher/go-spaserve/compare/v1.1.0...v1.2.0) (2025-06-04)
+
+
+### Features
+
+* add CSP support, targeting via globs ([#14](https://github.com/jrschumacher/go-spaserve/issues/14)) ([549de7e](https://github.com/jrschumacher/go-spaserve/commit/549de7ebee9a0b28321cb523944b875bf69a8143))
+
 ## [1.1.0](https://github.com/jrschumacher/go-spaserve/compare/v1.0.0...v1.1.0) (2025-04-30)
 
 
